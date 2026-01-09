@@ -9,7 +9,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 # === BOT CONFIG ===
 api_id = 21845583  # Replace with your API ID
 api_hash = "081a3cc51a428ad292be0be4d4f4f975"  # Replace with your API hash
-bot_token = "7975712662:AAH9OXqQGrd1SWIcqfkcsv2Qq07076I7qiY"  # Replace with your bot token
+bot_token = "8523604881:AAFIodwgB7DR3FI-4Nx3hIenv9dN8WdbFFE"  # Replace with your bot token
 
 app = Client("UptimeX_Bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
 
