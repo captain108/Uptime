@@ -1,5 +1,5 @@
-pyrogram
-tgcrypto
-aiohttp
-motor
+pyrogram==2.0.106
+tgcrypto==1.2.5
+aiohttp==3.9.5
+motor==3.5.1
 flask
