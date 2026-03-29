@@ -67,9 +67,12 @@ def monitor_card(i, m):
     return f"""
 ╭━━ 🌐 Monitor #{i+1} ━━╮
 🔗 {m['url']}
+
 {icon} Status : {m['status']}
 ⚡ Ping   : {m.get('ping','-')} ms
 📊 Uptime : {m['uptime']}%
+⏱ Interval: {m['interval']} sec
+
 ╰━━━━━━━━━━━━━━━━━━╯
 """
 
