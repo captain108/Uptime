@@ -1,9 +1,11 @@
 import os
 import asyncio
-import random
 import time
 from datetime import datetime
 import aiohttp
+from flask import Flask
+import threading
+
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -14,9 +16,9 @@ API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
 
-SLOW_THRESHOLD = 2000  # ms
+SLOW_THRESHOLD = 2000
 
-app = Client("UptimeX_Bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("UptimeX", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 mongo = AsyncIOMotorClient(MONGO_URI)
 db = mongo["uptime_bot"]
@@ -25,6 +27,18 @@ users_col = db["users"]
 tasks = {}
 user_states = {}
 
+# ================= FLASK ================= #
+web = Flask(__name__)
+
+@web.route("/")
+def home():
+    return "🚀 Bot Running"
+
+def run_web():
+    web.run(host="0.0.0.0", port=8000)
+
+threading.Thread(target=run_web, daemon=True).start()
+
 # ================= DB ================= #
 async def get_user(uid):
     return await users_col.find_one({"user_id": str(uid)})
@@ -32,7 +46,7 @@ async def get_user(uid):
 async def create_user(uid):
     await users_col.update_one(
         {"user_id": str(uid)},
-        {"$setOnInsert": {"monitors": []}},
+        {"$setOnInsert": {"monitors": [], "logged_in": True}},
         upsert=True
     )
 
@@ -40,33 +54,33 @@ async def update_user(uid, data):
     await users_col.update_one({"user_id": str(uid)}, {"$set": data})
 
 # ================= UI ================= #
-def start_buttons():
+def menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Register", callback_data="reg")],
-        [InlineKeyboardButton("Login", callback_data="login")]
+        [InlineKeyboardButton("📊 Monitors", callback_data="my")],
+        [InlineKeyboardButton("➕ Add Monitor", callback_data="add")],
+        [InlineKeyboardButton("⚡ Check All", callback_data="check_all")]
     ])
 
-def main_menu():
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("My Monitors", callback_data="my"),
-            InlineKeyboardButton("Add Monitor", callback_data="add")
-        ],
-        [
-            InlineKeyboardButton("Check All", callback_data="check_all")
-        ]
-    ])
+def monitor_card(i, m):
+    return f"""
+╭━━ 🌐 Monitor #{i+1} ━━╮
+🔗 {m['url']}
+🟢 Status : {m['status']}
+⚡ Ping   : {m.get('ping','-')} ms
+📊 Uptime : {m['uptime']}%
+╰━━━━━━━━━━━━━━━━━━╯
+"""
 
 # ================= START ================= #
 @app.on_message(filters.command("start"))
 async def start(client, message):
     uid = message.from_user.id
-    user = await get_user(uid)
+    await create_user(uid)
 
-    if user and user.get("logged_in"):
-        await message.reply("Welcome back!", reply_markup=main_menu())
-    else:
-        await message.reply("Welcome! Choose an option:", reply_markup=start_buttons())
+    await message.reply(
+        "🚀 Uptime Monitor\nKeep your sites alive 24/7",
+        reply_markup=menu()
+    )
 
 # ================= CALLBACK ================= #
 @app.on_callback_query()
@@ -75,84 +89,81 @@ async def cb(client, q):
     data = q.data
     user = await get_user(uid)
 
-    # ===== AUTH =====
-    if data == "reg":
-        user_states[uid] = {"state": "reg_user"}
-        await q.message.reply("Enter username:")
-
-    elif data == "login":
-        user_states[uid] = {"state": "login_user"}
-        await q.message.reply("Enter username:")
-
-    # ===== MAIN =====
-    elif data == "add":
-        if not user.get("logged_in"):
-            return await q.message.reply("Please login first")
-
+    # ===== ADD =====
+    if data == "add":
         user_states[uid] = {"state": "url"}
-        await q.message.reply("Enter URL:")
+        return await q.message.edit_text("🌐 Send URL:")
 
+    # ===== MY MONITORS =====
     elif data == "my":
         if not user["monitors"]:
-            return await q.message.reply("No monitors found")
+            return await q.message.edit_text("❌ No monitors found", reply_markup=menu())
 
+        text = ""
         for i, m in enumerate(user["monitors"]):
-            await q.message.reply(
-                f"""
-URL: {m['url']}
-Status: {m['status']}
-Ping: {m.get('ping','-')} ms
-Avg: {m.get('avg_ping','-')} ms
-Uptime: {m['uptime']}%
-""",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Details", callback_data=f"detail_{i}")],
-                    [InlineKeyboardButton("Delete", callback_data=f"del_{i}")]
-                ])
-            )
+            text += monitor_card(i, m) + "\n"
 
+        return await q.message.edit_text(
+            text[:4000],
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Refresh", callback_data="my")]
+            ])
+        )
+
+    # ===== DETAIL =====
     elif data.startswith("detail_"):
         i = int(data.split("_")[1])
         m = user["monitors"][i]
 
-        await q.message.reply(f"""
-Detailed Report
+        return await q.message.edit_text(f"""
+🔍 Monitor Details
 
-URL: {m['url']}
-Status: {m['status']}
-Ping: {m.get('ping','-')} ms
-Average Ping: {m.get('avg_ping','-')} ms
-Uptime: {m['uptime']}%
-Total Checks: {m['total']}
-Success: {m['success']}
-""")
+🔗 {m['url']}
+🟢 Status : {m['status']}
+⚡ Ping   : {m.get('ping','-')} ms
+📊 Uptime : {m['uptime']}%
 
+🧠 Checks : {m['total']}
+""",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅ Back", callback_data="my")]
+        ]))
+
+    # ===== DELETE =====
     elif data.startswith("del_"):
         i = int(data.split("_")[1])
         user["monitors"].pop(i)
         await update_user(uid, {"monitors": user["monitors"]})
-        await q.message.reply("Deleted")
 
+        return await q.message.edit_text("🗑 Deleted", reply_markup=menu())
+
+    # ===== CHECK ALL =====
     elif data == "check_all":
+        await q.message.edit_text("⚡ Checking...")
+
         async def check(m):
             try:
                 start = datetime.now()
                 async with aiohttp.ClientSession() as s:
                     async with s.head(m["url"], timeout=5):
-                        end = datetime.now()
-                        ms = int((end - start).total_seconds() * 1000)
+                        ms = int((datetime.now() - start).total_seconds() * 1000)
                         return f"🟢 {m['url']} ({ms} ms)"
             except:
                 return f"🔴 {m['url']}"
 
         results = await asyncio.gather(*[check(m) for m in user["monitors"]])
-        await q.message.reply("\n".join(results[:20]))
+
+        return await q.message.edit_text(
+            "📊 Results\n\n" + "\n".join(results[:15]),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅ Back", callback_data="my")]
+            ])
+        )
 
 # ================= INPUT ================= #
 @app.on_message(filters.text)
 async def input_handler(client, message):
     uid = message.from_user.id
-    text = message.text
 
     if uid not in user_states:
         return
@@ -160,41 +171,13 @@ async def input_handler(client, message):
     state = user_states[uid]["state"]
     user = await get_user(uid)
 
-    # REGISTER
-    if state == "reg_user":
-        user_states[uid] = {"state": "reg_pass", "username": text}
-        await message.reply("Enter password:")
-
-    elif state == "reg_pass":
-        await users_col.update_one(
-            {"user_id": str(uid)},
-            {"$set": {"username": user_states[uid]["username"], "password": text, "logged_in": True, "monitors": []}},
-            upsert=True
-        )
-        await message.reply("Registered successfully!", reply_markup=main_menu())
-        user_states.pop(uid)
-
-    # LOGIN
-    elif state == "login_user":
-        user_states[uid] = {"state": "login_pass", "username": text}
-        await message.reply("Enter password:")
-
-    elif state == "login_pass":
-        if user and user.get("username") == user_states[uid]["username"] and user.get("password") == text:
-            await update_user(uid, {"logged_in": True})
-            await message.reply("Login successful!", reply_markup=main_menu())
-        else:
-            await message.reply("Invalid credentials")
-        user_states.pop(uid)
-
-    # ADD MONITOR
-    elif state == "url":
-        user_states[uid] = {"state": "interval", "url": text}
-        await message.reply("Enter interval (seconds):")
+    if state == "url":
+        user_states[uid] = {"state": "interval", "url": message.text}
+        return await message.reply("⏱ Interval (seconds):")
 
     elif state == "interval":
-        interval = int(text)
         url = user_states[uid]["url"]
+        interval = int(message.text)
 
         monitor = {
             "url": url,
@@ -203,8 +186,7 @@ async def input_handler(client, message):
             "uptime": 100,
             "total": 0,
             "success": 0,
-            "alerts": True,
-            "ping_history": []
+            "alerts": True
         }
 
         user["monitors"].append(monitor)
@@ -213,8 +195,9 @@ async def input_handler(client, message):
         i = len(user["monitors"]) - 1
         tasks[(uid, i)] = asyncio.create_task(ping(uid, i))
 
-        await message.reply("Monitor added!")
         user_states.pop(uid)
+
+        return await message.reply("✅ Monitor Added", reply_markup=menu())
 
 # ================= PING ================= #
 async def ping(uid, i):
@@ -231,8 +214,7 @@ async def ping(uid, i):
             start = datetime.now()
             async with aiohttp.ClientSession() as s:
                 async with s.head(m["url"], timeout=10):
-                    end = datetime.now()
-                    ms = int((end - start).total_seconds() * 1000)
+                    ms = int((datetime.now() - start).total_seconds() * 1000)
 
                     status = "🟢"
                     m["success"] += 1
@@ -245,23 +227,12 @@ async def ping(uid, i):
         m["uptime"] = round((m["success"] / m["total"]) * 100, 2)
         m["status"] = status
 
-        # avg ping
-        if m["ping"] != "-":
-            m["ping_history"].append(m["ping"])
-            m["ping_history"] = m["ping_history"][-20:]
-            m["avg_ping"] = int(sum(m["ping_history"]) / len(m["ping_history"]))
-
         # slow alert
         now = time.time()
         if m.get("ping") != "-" and m["ping"] > SLOW_THRESHOLD:
             if now - m.get("last_slow_alert", 0) > 300:
-                await app.send_message(uid, f"⚠️ Slow response: {m['url']} ({m['ping']} ms)")
+                await app.send_message(uid, f"⚠️ Slow: {m['url']} ({m['ping']} ms)")
                 m["last_slow_alert"] = now
-
-        # prediction
-        if len(m["ping_history"]) >= 5:
-            if all(p > SLOW_THRESHOLD for p in m["ping_history"][-5:]):
-                await app.send_message(uid, f"⚠️ Prediction: {m['url']} may go DOWN")
 
         if last != status:
             await update_user(uid, {"monitors": user["monitors"]})
@@ -270,5 +241,4 @@ async def ping(uid, i):
         await asyncio.sleep(m["interval"])
 
 # ================= RUN ================= #
-async def start_bot():
-    await app.start()
+app.run()
