@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>UptimeX Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-900 text-white p-6">
+
+<h1 class="text-3xl mb-6">🚀 Uptime Dashboard</h1>
+
+<div class="grid md:grid-cols-3 gap-4">
+
+{% for m in monitors %}
+<div class="bg-gray-800 p-4 rounded-xl shadow-lg">
+<h2 class="truncate">{{m.url}}</h2>
+<p>Status: {{m.status}}</p>
+<p>Uptime: {{m.uptime}}%</p>
+<p>Interval: {{m.interval}}s</p>
+</div>
+{% endfor %}
+
+</div>
+
+</body>
+</html>
