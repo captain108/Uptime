@@ -1,47 +1,35 @@
-import os
-import subprocess
-import time
 import threading
-from flask import Flask
+import asyncio
+import os
+from flask import Flask, render_template
+from motor.motor_asyncio import AsyncIOMotorClient
+
+from app import start_bot  # import bot
 
 app = Flask(__name__)
 
-APP_SCRIPT = "app.py"
-CHECK_INTERVAL = 300  # 5 minutes
-process = None
+# ===== Mongo =====
+mongo = AsyncIOMotorClient(os.getenv("MONGO_URI"))
+db = mongo["uptime_bot"]
 
-def is_process_running(name):
-    try:
-        # Use pgrep to check if script is running
-        output = subprocess.check_output(["pgrep", "-f", name])
-        return bool(output.strip())
-    except subprocess.CalledProcessError:
-        return False
-
-def start_app():
-    global process
-    print(f"Starting {APP_SCRIPT}...")
-    process = subprocess.Popen(["python3", APP_SCRIPT])
-
-def monitor_app():
-    while True:
-        if not is_process_running(APP_SCRIPT):
-            print(f"{APP_SCRIPT} is not running. Restarting...")
-            start_app()
-        else:
-            print(f"{APP_SCRIPT} is running.")
-        time.sleep(CHECK_INTERVAL)
-
+# ===== Dashboard =====
 @app.route("/")
-def status():
-    running = is_process_running(APP_SCRIPT)
-    return f"{APP_SCRIPT} is {'running ✅' if running else 'not running ❌'}."
+async def index():
+    monitors = []
+    async for u in db["users"].find():
+        monitors += u.get("monitors", [])
+    return render_template("index.html", monitors=monitors)
 
+# ===== Bot Thread =====
+def run_bot():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(start_bot())
+    loop.run_forever()
+
+# ===== Start =====
 if __name__ == "__main__":
-    # Start monitor in background
-    monitor_thread = threading.Thread(target=monitor_app)
-    monitor_thread.daemon = True
-    monitor_thread.start()
+    threading.Thread(target=run_bot, daemon=True).start()
 
-    # Start Flask app
-    app.run(host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    app.run(host="0.0.0.0", port=port)
