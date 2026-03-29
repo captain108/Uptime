@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body style="background:black;color:white">
+
+<h2>📊 Uptime Graph</h2>
+<canvas id="chart"></canvas>
+
+<script>
+fetch('/api/stats')
+.then(res => res.json())
+.then(data => {
+
+    const labels = data.map(x => x.url);
+    const values = data.map(x => x.uptime);
+
+    new Chart(document.getElementById("chart"), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Uptime %',
+                data: values
+            }]
+        }
+    });
+
+});
+</script>
+
+</body>
+</html>
