@@ -270,4 +270,5 @@ async def ping(uid, i):
         await asyncio.sleep(m["interval"])
 
 # ================= RUN ================= #
-app.run()
+async def start_bot():
+    await app.start()
